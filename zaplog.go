@@ -1,7 +1,7 @@
 package zaplog
 
 import (
-	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -24,7 +24,7 @@ type Option func(*option)
 type option struct {
 	level      zapcore.Level
 	fields     map[string]string
-	file       *lumberjack.Logger
+	file       io.Writer
 	timeLayout string
 }
 
@@ -67,11 +67,28 @@ func WithField(key, value string) Option {
 func WithFileP(file string) Option {
 	dir := filepath.Dir(file)
 	if err := os.MkdirAll(dir, 0766); err != nil {
-		panic(fmt.Sprintf("mkdir -p %s err", dir))
+		panic(err)
+	}
+
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0766)
+	if err != nil {
+		panic(err)
 	}
 
 	return func(opt *option) {
-		opt.file = &lumberjack.Logger{
+		opt.file = zapcore.Lock(f)
+	}
+}
+
+// WithFileRotationP write log to some file with rotation
+func WithFileRotationP(file string) Option {
+	dir := filepath.Dir(file)
+	if err := os.MkdirAll(dir, 0766); err != nil {
+		panic(err)
+	}
+
+	return func(opt *option) {
+		opt.file = &lumberjack.Logger{ // concurrent-safed
 			Filename:   file,
 			MaxSize:    10, // megabytes
 			MaxBackups: 100,
@@ -102,7 +119,7 @@ func NewJSONLogger(opts ...Option) (*zap.Logger, error) {
 
 	// similar to zap.NewProductionEncoderConfig()
 	encoderConfig := zapcore.EncoderConfig{
-		TimeKey:       "ts",
+		TimeKey:       "timestamp",
 		LevelKey:      "level",
 		NameKey:       "logger", // used by logger.Named(key); optional; useless
 		CallerKey:     "caller",
@@ -146,7 +163,7 @@ func NewJSONLogger(opts ...Option) (*zap.Logger, error) {
 	if opt.file != nil {
 		core = zapcore.NewTee(core,
 			zapcore.NewCore(jsonEncoder,
-				zapcore.AddSync(opt.file), // lumberjack.logger concurrent-safed
+				zapcore.AddSync(opt.file),
 				zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
 					return lvl >= opt.level
 				}),
