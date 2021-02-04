@@ -3,7 +3,7 @@ package zaplog
 import (
 	"testing"
 
-	"github.com/pkg/errors"
+	"github.com/koketama/errors"
 )
 
 func TestJSONLogger(t *testing.T) {
